@@ -1,5 +1,6 @@
 #import "FlutterDownloaderPlugin.h"
 #import "DBManager.h"
+#import <Photos/Photos.h>
 
 #define STATUS_UNDEFINED 0
 #define STATUS_ENQUEUED 1
@@ -889,22 +890,55 @@ static BOOL debug = YES;
     BOOL success = [fileManager copyItemAtURL:location
                                         toURL:destinationURL
                                         error:&error];
+    
 
-    __typeof__(self) __weak weakSelf = self;
-    if (success) {
-        [self sendUpdateProgressForTaskId:taskId inStatus:@(STATUS_COMPLETE) andProgress:@100];
-        dispatch_sync(databaseQueue, ^{
-            [weakSelf updateTask:taskId status:STATUS_COMPLETE progress:100];
-        });
-    } else {
-        if (debug) {
-            NSLog(@"Unable to copy temp file. Error: %@", [error localizedDescription]);
+//    __typeof__(self) __weak weakSelf = self;
+//    if (success) {
+//        [self sendUpdateProgressForTaskId:taskId inStatus:@(STATUS_COMPLETE) andProgress:@100];
+//        dispatch_sync(databaseQueue, ^{
+//            [weakSelf updateTask:taskId status:STATUS_COMPLETE progress:100];
+//        });
+//    } else {
+//        if (debug) {
+//            NSLog(@"Unable to copy temp file. Error: %@", [error localizedDescription]);
+//        }
+//        [self sendUpdateProgressForTaskId:taskId inStatus:@(STATUS_FAILED) andProgress:@(-1)];
+//        dispatch_sync(databaseQueue, ^{
+//            [weakSelf updateTask:taskId status:STATUS_FAILED progress:-1];
+//        });
+//    }
+    [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
+        if (@available(iOS 9, *)) {
+            NSString *extension = [[destinationURL pathExtension] lowercaseString];
+            if([extension  isEqual: @"mov"] || [extension  isEqual: @"mp4"]){
+                PHAssetCreationRequest *request = [PHAssetCreationRequest creationRequestForAsset];
+                [request addResourceWithType:PHAssetResourceTypeVideo fileURL:destinationURL options:nil];
+            }else{
+                [PHAssetChangeRequest creationRequestForAssetFromImageAtFileURL:destinationURL];
+            }
+            
+        } else {
+            // Fallback on earlier versions
         }
-        [self sendUpdateProgressForTaskId:taskId inStatus:@(STATUS_FAILED) andProgress:@(-1)];
-        dispatch_sync(databaseQueue, ^{
-            [weakSelf updateTask:taskId status:STATUS_FAILED progress:-1];
-        });
-    }
+    } completionHandler:^(BOOL success, NSError * _Nullable error) {
+        __typeof__(self) __weak weakSelf = self;
+        if (success) {
+            [self sendUpdateProgressForTaskId:taskId inStatus:@(STATUS_COMPLETE) andProgress:@100];
+            dispatch_sync(self->databaseQueue, ^{
+                [weakSelf updateTask:taskId status:STATUS_COMPLETE progress:100];
+            });
+        } else {
+            if (debug) {
+                NSLog(@"Unable to copy temp file. Error: %@", [error localizedDescription]);
+            }
+            [self sendUpdateProgressForTaskId:taskId inStatus:@(STATUS_FAILED) andProgress:@(-1)];
+            dispatch_sync(self->databaseQueue, ^{
+                [weakSelf updateTask:taskId status:STATUS_FAILED progress:-1];
+            });
+        }
+    }];
+
+    
 }
 
 -(void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error
